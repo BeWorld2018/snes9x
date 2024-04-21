@@ -49,6 +49,8 @@
 extern "C" {
 #endif
 
+#define ZEXPORT
+
 #ifndef _ZLIB_H
 #include "zlib.h"
 #endif

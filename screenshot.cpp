@@ -52,7 +52,11 @@ bool8 S9xDoScreenshot (int width, int height)
 		return (FALSE);
 	}
 
+#ifdef __MORPHOS__
+	if (setjmp59(png_ptr->jmpbuf59))
+#else
 	if (setjmp(png_jmpbuf(png_ptr)))
+#endif
 	{
 		png_destroy_write_struct(&png_ptr, &info_ptr);
 		fclose(fp);

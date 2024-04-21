@@ -147,6 +147,10 @@ void SetInfoDlgColor(unsigned char, unsigned char, unsigned char);
 #define SLASH_STR	"/"
 #define SLASH_CHAR	'/'
 #endif
+#ifdef __MORPHOS__
+#define TITLE "Snes9x: MorphOS"
+#define SYS_CONFIG_FILE "PROGDIR:snes9x.conf"
+#endif
 
 #ifndef TITLE
 #define TITLE "Snes9x"

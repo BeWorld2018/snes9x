@@ -154,7 +154,7 @@ static uint8						turbo_time;
 static uint8						pseudobuttons[256];
 static bool8						FLAG_LATCH = FALSE;
 static int32						curcontrollers[2] = { NONE,    NONE };
-static int32						newcontrollers[2] = { JOYPAD0, NONE };
+static int32						newcontrollers[2] = { JOYPAD0, JOYPAD1 };
 static char							buf[256];
 
 static const char	*color_names[32] =
