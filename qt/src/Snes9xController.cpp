@@ -1,14 +1,13 @@
 #include "Snes9xController.hpp"
+#include "EmuConfig.hpp"
 #include "SoftwareScalers.hpp"
-#include <memory>
+#include "fscompat.h"
 #include <filesystem>
 namespace fs = std::filesystem;
 
 #include "snes9x.h"
 #include "memmap.h"
-#include "srtc.h"
 #include "apu/apu.h"
-#include "apu/bapu/snes/snes.hpp"
 #include "gfx.h"
 #include "snapshot.h"
 #include "controls.h"
@@ -416,9 +415,9 @@ std::string S9xGetDirectory(s9x_getdirtype dirtype)
         path.remove_filename();
 
         if (!fs::is_directory(path))
-            dirname = fs::current_path().u8string();
+            dirname = fs::current_path().string();
         else
-            dirname = path.u8string();
+            dirname = path.string();
     }
 
     return dirname;
@@ -474,7 +473,7 @@ std::string S9xGetFilenameInc(std::string e, enum s9x_getdirtype dirtype)
         i++;
     } while (fs::exists(new_filename));
 
-    return new_filename.u8string();
+    return new_filename.string();
 }
 
 bool8 S9xInitUpdate()
@@ -533,7 +532,10 @@ void Snes9xController::clearSoundBuffer()
 
 void S9xMessage(int message_class, int type, const char *message)
 {
-    S9xSetInfoString(message);
+    if (type == S9X_ROM_INFO)
+        S9xSetInfoString(Memory.GetMultilineROMInfo().c_str());
+
+    printf("%s\n", message);
 }
 
 const char *S9xStringInput(const char *prompt)
@@ -610,8 +612,28 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
 
     S9xUnmapAllControls();
 
-    S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
-    S9xSetController(1, CTL_JOYPAD, 1, 1, 1, 1);
+    switch (config->port_configuration)
+    {
+    case EmuConfig::eTwoControllers:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 1, 1, 1, 1);
+        break;
+    case EmuConfig::eMousePlusController:
+        S9xSetController(0, CTL_MOUSE, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 0, 0, 0, 0);
+        break;
+    case EmuConfig::eSuperScopePlusController:
+        S9xSetController(0, CTL_SUPERSCOPE, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 0, 0, 0, 0);
+        break;
+    case EmuConfig::eControllerPlusMultitap:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MP5, 1, 2, 3, 4);
+        break;
+    default:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_NONE, 0, 0, 0, 0);
+    }
 
     for (int controller_number = 0; controller_number < 5; controller_number++)
     {
@@ -645,11 +667,38 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
                 S9xMapButton(binding.hash(), command, false);
         }
     }
+
+    auto cmd = S9xGetCommandT("Pointer Mouse1+Superscope+Justifier1");
+    S9xMapPointer(EmuBinding::MOUSE_POINTER, cmd, false);
+    mouse_x = mouse_y = 0;
+    S9xReportPointer(EmuBinding::MOUSE_POINTER, mouse_x, mouse_y);
+
+    cmd = S9xGetCommandT("{Mouse1 L,Superscope Fire,Justifier1 Trigger}");
+    S9xMapButton(EmuBinding::MOUSE_BUTTON1, cmd, false);
+
+    cmd = S9xGetCommandT("{Justifier1 AimOffscreen Trigger,Superscope AimOffscreen}");
+    S9xMapButton(EmuBinding::MOUSE_BUTTON3, cmd, false);
+
+    cmd = S9xGetCommandT("{Mouse1 R,Superscope Cursor,Justifier1 Start}");
+    S9xMapButton(EmuBinding::MOUSE_BUTTON2, cmd, false);
+
 }
 
 void Snes9xController::reportBinding(EmuBinding b, bool active)
 {
     S9xReportButton(b.hash(), active);
+}
+
+void Snes9xController::reportMouseButton(int button, bool pressed)
+{
+    S9xReportButton(EmuBinding::MOUSE_POINTER + button, pressed);
+}
+
+void Snes9xController::reportPointer(int x, int y)
+{
+    mouse_x += x;
+    mouse_y += y;
+    S9xReportPointer(EmuBinding::MOUSE_POINTER, mouse_x, mouse_y);
 }
 
 static fs::path save_slot_path(int slot)
@@ -673,9 +722,14 @@ std::string Snes9xController::getStateFolder()
     return S9xGetDirectory(SNAPSHOT_DIR);
 }
 
+bool Snes9xController::slotUsed(int slot)
+{
+    return fs::exists(save_slot_path(slot));
+}
+
 bool Snes9xController::loadState(int slot)
 {
-    return loadState(save_slot_path(slot).u8string());
+    return loadState(save_slot_path(slot).string());
 }
 
 bool Snes9xController::loadState(std::string filename)
@@ -738,7 +792,7 @@ void Snes9xController::softReset()
 
 bool Snes9xController::saveState(int slot)
 {
-    return saveState(save_slot_path(slot).u8string());
+    return saveState(save_slot_path(slot).string());
 }
 
 void Snes9xController::setMessage(std::string message)
@@ -804,4 +858,9 @@ std::string Snes9xController::validateCheat(std::string code)
 int Snes9xController::modifyCheat(int index, std::string name, std::string code)
 {
     return S9xModifyCheatGroup(index, name, code);
+}
+
+std::string Snes9xController::getContentFolder()
+{
+    return S9xGetDirectory(ROMFILENAME_DIR);
 }

@@ -39,6 +39,8 @@ class Snes9xWindow : public GtkBuilderWindow
     void leave_fullscreen_mode();
     void toggle_fullscreen_mode();
     void finish_fullscreen();
+    void set_bypass_compositor(bool bypass);
+    void set_custom_video_mode(bool enable);
 
     /* Cursor modifying functions */
     void show_mouse_cursor();
@@ -88,7 +90,6 @@ class Snes9xWindow : public GtkBuilderWindow
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;
     int mouse_region_width, mouse_region_height;
-    int nfs_width, nfs_height, nfs_x, nfs_y;
     int autovrr_saved_frameskip;
     int autovrr_saved_sound_input_rate;
     bool autovrr_saved_sync_to_vblank;

@@ -4,8 +4,6 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
-#include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <filesystem>
@@ -33,22 +31,21 @@ std::string get_config_dir()
         return std::string{".snes9x"};
     }
 
-    fs::path config = env_home;
-    fs::path legacy = config;
-
+    fs::path config;
     // If XDG_CONFIG_HOME is set, use that, otherwise guess default
-    if (!env_xdg_config_home)
-    {
-        config /= ".config/snes9x";
-        legacy /= ".snes9x";
-    }
-    else
+    if (env_xdg_config_home)
     {
         config = env_xdg_config_home;
         config /= "snes9x";
     }
-    if (fs::exists(legacy) && !fs::exists(config))
-        return legacy;
+    else
+    {
+        config = env_home;
+        config /= ".config/snes9x";
+    }
+
+    if (!fs::exists(config))
+        fs::create_directories(config);
 
     return config;
 }
@@ -722,9 +719,15 @@ void Snes9xConfig::rebind_keys()
     cmd = S9xGetPortCommandT("{Mouse1 L,Superscope Fire,Justifier1 Trigger}");
     S9xMapButton(BINDING_MOUSE_BUTTON0, cmd, false);
 
-    cmd = S9xGetPortCommandT("{Justifier1 AimOffscreen Trigger,Superscope AimOffscreen}");
+    cmd = S9xGetPortCommandT("Superscope ToggleTurbo");
     S9xMapButton(BINDING_MOUSE_BUTTON1, cmd, false);
 
-    cmd = S9xGetPortCommandT("{Mouse1 R,Superscope Cursor,Justifier1 Start}");
+    cmd = S9xGetPortCommandT("{Mouse1 R,Superscope Pause,Justifier1 Start}");
     S9xMapButton(BINDING_MOUSE_BUTTON2, cmd, false);
+
+    cmd = S9xGetPortCommandT("Superscope Cursor");
+    S9xMapButton(BINDING_MOUSE_BUTTON0 + 7, cmd, false);
+
+    cmd = S9xGetPortCommandT("{Superscope AimOffscreen,Justifier1 AimOffscreen}");
+    S9xMapButton(BINDING_MOUSE_BUTTON0 + 8, cmd, false);
 }

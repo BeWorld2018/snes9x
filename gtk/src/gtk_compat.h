@@ -20,10 +20,18 @@
 
 #ifdef GDK_WINDOWING_WAYLAND
 #include <gdk/gdkwayland.h>
+inline bool is_wayland()
+{
+   return GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default());
+}
 #endif
 
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
+inline bool is_x11()
+{
+   return GDK_IS_X11_DISPLAY(gdk_display_get_default());
+}
 #endif
 
 #endif

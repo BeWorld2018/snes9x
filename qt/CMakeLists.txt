@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(snes9x-qt VERSION 1.61)
+project(snes9x-qt VERSION 1.63)
 
-set(CMAKE_CXX_STANDARD 17)
+include(GNUInstallDirs)
+
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -74,7 +76,7 @@ set(SNES9X_CORE_SOURCES
     ../fscompat.cpp)
 add_library(snes9x-core ${SNES9X_CORE_SOURCES})
 target_include_directories(snes9x-core PRIVATE ../)
-target_compile_definitions(snes9x-core PRIVATE ${DEFINES} ZLIB HAVE_STDINT_H ALLOW_CPU_OVERCLOCK)
+target_compile_definitions(snes9x-core PRIVATE ${DEFINES} ZLIB HAVE_STDINT_H HAVE_LIBPNG ALLOW_CPU_OVERCLOCK)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     set(PREBUILT_QT "${PROJECT_SOURCE_DIR}/../external/qt6-mingw-clang-bin")
@@ -96,17 +98,23 @@ list(APPEND LIBS Qt6::Widgets Qt6::Gui)
 list(APPEND INCLUDES ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL REQUIRED sdl2)
 pkg_check_modules(ZLIB REQUIRED zlib)
-list(APPEND INCLUDES ${SDL_INCLUDE_DIRS} ${ZLIB_INCLUDE_DIRS})
-list(APPEND FLAGS ${SDL_COMPILE_FLAGS} ${ZLIB_COMPILE_FLAGS})
+pkg_check_modules(PNG REQUIRED libpng)
+list(APPEND INCLUDES ${ZLIB_INCLUDE_DIRS})
+list(APPEND FLAGS ${ZLIB_COMPILE_FLAGS})
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    list(APPEND LIBS opengl32 libSDL2.a libz.a libc++.a)
-    list(APPEND LIBS gdi32 winmm imm32 ole32 oleaut32 version uuid advapi32 setupapi shell32 dinput8)
-    list(APPEND DEFINES SDL_MAIN_HANDLED)
+    if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+        message("Clang compiler, using libc++.")
+        list(APPEND LIBS libc++.a)
+    elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+        message("GNU compiler, using libstdc++.")
+        list(APPEND LIBS libstdc++.a)
+    endif()
+
+    list(APPEND LIBS libz.a libpng.a opengl32 gdi32 winmm imm32 ole32 oleaut32 version uuid advapi32 setupapi shell32 dinput8)
     list(APPEND PLATFORM_SOURCES
-        ../common/video/wgl_context.cpp
+        ../common/video/opengl/wgl_context.cpp
         ../external/glad/src/wgl.c
         src/resources/snes9x_win32.rc)
 else()
@@ -118,7 +126,7 @@ else()
     endif()
 
     list(APPEND INCLUDES ${WAYLAND_INCLUDE_DIRS} ${X11_INCLUDE_DIRS})
-    list(APPEND LIBS ${WAYLAND_LIBRARIES} ${X11_LIBRARIES} ${ZLIB_LIBRARIES} ${SDL_LIBRARIES})
+    list(APPEND LIBS ${WAYLAND_LIBRARIES} ${PNG_LIBRARIES} ${X11_LIBRARIES} ${ZLIB_LIBRARIES})
     list(APPEND FLAGS ${WAYLAND_CFLAGS})
 
     pkg_check_modules(PULSEAUDIO libpulse)
@@ -130,15 +138,50 @@ else()
     endif()
 
     list(APPEND PLATFORM_SOURCES
-    ../common/video/glx_context.cpp
-    ../common/video/wayland_egl_context.cpp
-    ../common/video/wayland_surface.cpp
-    ../common/video/fractional-scale-v1.c
-    ../common/video/viewporter-client-protocol.c
-    ../common/video/wayland-idle-inhibit-unstable-v1.c
+    ../common/video/opengl/glx_context.cpp
+    ../common/video/opengl/glx_context.hpp
+    ../common/video/opengl/wayland_egl_context.cpp
+    ../common/video/opengl/wayland_egl_context.hpp
+    ../common/video/wayland/wayland_surface.cpp
+    ../common/video/wayland/wayland_surface.hpp
+    ../common/video/wayland/fractional-scale-v1.c
+    ../common/video/wayland/fractional-scale-v1.h
+    ../common/video/wayland/viewporter-client-protocol.c
+    ../common/video/wayland/viewporter-client-protocol.h
+    ../common/video/wayland/wayland-idle-inhibit-unstable-v1.c
+    ../common/video/wayland/wayland-idle-inhibit-unstable-v1.h
     ../external/glad/src/glx.c
     ../external/glad/src/egl.c)
 endif()
+
+find_package(SDL3 QUIET)
+if (SDL3_FOUND AND (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Windows"))
+    message("Using system SDL3.")
+    list(APPEND LIBS SDL3::SDL3)
+    list(APPEND INCLUDES ${SDL3_INCLUDE_DIRS})
+else()
+    include(FetchContent)
+    FetchContent_Declare(
+        SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.2.0
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE
+        EXCLUDE_FROM_ALL
+    )
+    message(STATUS "Using SDL3 via FetchContent")
+    set(SDL_UNIX_CONSOLE_BUILD FORCE CACHE BOOL ON)
+    set(SDL_GPU CACHE BOOL OFF)
+    set(SDL_VIDEO CACHE BOOL OFF)
+    set(SDL_RENDER CACHE BOOL OFF)
+    set(SDL_SHARED BOOL FALSE)
+    set(SDL_STATIC BOOL TRUE)
+    FetchContent_MakeAvailable(SDL3)
+    list(APPEND INCLUDES ${SDL3_SOURCE_DIR}/include)
+    list(APPEND LIBS SDL3::SDL3-static)
+endif()
+
+list(APPEND DEFINES SDL_MAIN_HANDLED)
 
 list(APPEND PLATFORM_SOURCES ../external/fmt/src/format.cc)
 list(APPEND INCLUDES ../external/fmt/include)
@@ -168,8 +211,8 @@ list(APPEND QT_GUI_SOURCES
     src/EmuCanvasOpenGL.cpp
     src/EmuCanvasVulkan.cpp
     ../external/glad/src/gl.c
-    ../common/audio/s9x_sound_driver_sdl.cpp
-    ../common/audio/s9x_sound_driver_sdl.hpp
+    ../common/audio/s9x_sound_driver_sdl3.cpp
+    ../common/audio/s9x_sound_driver_sdl3.hpp
     ../common/audio/s9x_sound_driver_cubeb.cpp
     ../common/audio/s9x_sound_driver_cubeb.hpp
     ../filter/2xsai.cpp
@@ -239,36 +282,38 @@ list(APPEND INCLUDES
     ../external/stb
     "../external/glad/include")
 list(APPEND SOURCES
-    ../vulkan/slang_shader.cpp
-    ../vulkan/slang_shader.hpp
-    ../vulkan/slang_preset.cpp
-    ../vulkan/slang_preset.hpp
-    ../vulkan/vulkan_hpp_storage.cpp
-    ../vulkan/vk_mem_alloc_implementation.cpp
-    ../vulkan/vulkan_context.cpp
-    ../vulkan/vulkan_context.hpp
-    ../vulkan/vulkan_texture.cpp
-    ../vulkan/vulkan_texture.hpp
-    ../vulkan/vulkan_swapchain.cpp
-    ../vulkan/vulkan_swapchain.hpp
-    ../vulkan/vulkan_slang_pipeline.cpp
-    ../vulkan/vulkan_slang_pipeline.hpp
-    ../vulkan/vulkan_pipeline_image.cpp
-    ../vulkan/vulkan_pipeline_image.hpp
-    ../vulkan/vulkan_shader_chain.cpp
-    ../vulkan/vulkan_shader_chain.hpp
-    ../vulkan/vulkan_simple_output.hpp
-    ../vulkan/vulkan_simple_output.cpp
-    ../vulkan/std_chrono_throttle.cpp
-    ../vulkan/std_chrono_throttle.hpp
-    ../vulkan/slang_helpers.cpp
-    ../vulkan/slang_helpers.hpp
-    ../vulkan/slang_preset_ini.cpp
-    ../vulkan/slang_preset_ini.hpp
+    ../common/video/vulkan/slang_shader.cpp
+    ../common/video/vulkan/slang_shader.hpp
+    ../common/video/vulkan/slang_preset.cpp
+    ../common/video/vulkan/slang_preset.hpp
+    ../common/video/vulkan/vulkan_hpp_storage.cpp
+    ../common/video/vulkan/vk_mem_alloc_implementation.cpp
+    ../common/video/vulkan/vulkan_context.cpp
+    ../common/video/vulkan/vulkan_context.hpp
+    ../common/video/vulkan/vulkan_common.cpp
+    ../common/video/vulkan/vulkan_common.hpp
+    ../common/video/vulkan/vulkan_texture.cpp
+    ../common/video/vulkan/vulkan_texture.hpp
+    ../common/video/vulkan/vulkan_swapchain.cpp
+    ../common/video/vulkan/vulkan_swapchain.hpp
+    ../common/video/vulkan/vulkan_slang_pipeline.cpp
+    ../common/video/vulkan/vulkan_slang_pipeline.hpp
+    ../common/video/vulkan/vulkan_pipeline_image.cpp
+    ../common/video/vulkan/vulkan_pipeline_image.hpp
+    ../common/video/vulkan/vulkan_shader_chain.cpp
+    ../common/video/vulkan/vulkan_shader_chain.hpp
+    ../common/video/vulkan/vulkan_simple_output.hpp
+    ../common/video/vulkan/vulkan_simple_output.cpp
+    ../common/video/std_chrono_throttle.cpp
+    ../common/video/std_chrono_throttle.hpp
+    ../common/video/vulkan/slang_helpers.cpp
+    ../common/video/vulkan/slang_helpers.hpp
+    ../common/video/vulkan/slang_preset_ini.cpp
+    ../common/video/vulkan/slang_preset_ini.hpp
     ../external/stb/stb_image_implementation.cpp
-    ../shaders/glsl.cpp
-    ../shaders/slang.cpp
-    ../shaders/shader_helpers.cpp)
+    ../common/video/opengl/shaders/glsl.cpp
+    ../common/video/opengl/shaders/slang.cpp
+    ../common/video/opengl/shaders/shader_helpers.cpp)
 
 list(APPEND DEFINES "IMGUI_IMPL_VULKAN_NO_PROTOTYPES")
 list(APPEND SOURCES ../external/imgui/imgui.cpp
@@ -286,8 +331,10 @@ add_executable(snes9x-qt ${QT_GUI_SOURCES} ${SOURCES} ${PLATFORM_SOURCES} src/re
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     set_target_properties(snes9x-qt PROPERTIES WIN32_EXECUTABLE True)
 endif()
-target_link_libraries(snes9x-qt snes9x-core ${LIBS})
+target_link_libraries(snes9x-qt PRIVATE snes9x-core ${LIBS})
 target_compile_definitions(snes9x-qt PRIVATE ${DEFINES})
 target_compile_options(snes9x-qt PRIVATE ${FLAGS})
 target_include_directories(snes9x-qt PRIVATE "../" ${INCLUDES})
 
+install(TARGETS snes9x-qt)
+install(FILES ../data/cheats.bml DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/snes9x)

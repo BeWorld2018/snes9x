@@ -7,13 +7,13 @@
 #pragma once
 #include "gtk_s9x.h"
 #include "gtk_display_driver.h"
-#include "vulkan/vulkan_context.hpp"
-#include "vulkan/vulkan_shader_chain.hpp"
-#include "vulkan/vulkan_simple_output.hpp"
-#include "vulkan/std_chrono_throttle.hpp"
+#include "common/video/vulkan/vulkan_context.hpp"
+#include "common/video/vulkan/vulkan_shader_chain.hpp"
+#include "common/video/vulkan/vulkan_simple_output.hpp"
+#include "common/video/std_chrono_throttle.hpp"
 
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
-#include "common/video/wayland_surface.hpp"
+#include "common/video/wayland/wayland_surface.hpp"
 #endif
 
 class S9xVulkanDisplayDriver : public S9xDisplayDriver
@@ -31,6 +31,8 @@ class S9xVulkanDisplayDriver : public S9xDisplayDriver
     bool can_throttle() override { return true; }
     int get_width() final override { return current_width; }
     int get_height() final override { return current_height; }
+    void shrink() override;
+    void regrow() override;
 
     static int query_availability();
 

@@ -62,13 +62,19 @@ bool CVulkan::Initialize(HWND hWnd)
 
     try {
         context = std::make_unique<Vulkan::Context>();
-        if (!context->init_win32(0, hWnd))
+        if (!context->init_win32())
+            return false;
+        if (!context->create_win32_surface(0, hWnd))
+            return false;
+        if (!context->create_swapchain())
             return false;
     }
     catch (std::exception& e)
     {
         return false;
     }
+
+    context->swapchain->set_vsync(GUI.Vsync);
 
     if (!Settings.AutoDisplayMessages)
     {
@@ -176,11 +182,9 @@ bool CVulkan::ChangeRenderSize(unsigned int newWidth, unsigned int newHeight)
     if (!context)
         return false;
 
-    bool vsync_changed = context->swapchain->set_vsync(GUI.Vsync);
-
-    if (newWidth != current_width || newHeight != current_height || vsync_changed)
+    if (newWidth != current_width || newHeight != current_height)
     {
-        context->recreate_swapchain(newWidth, newHeight);
+        context->recreate_swapchain();
         context->wait_idle();
         current_width = newWidth;
         current_height = newHeight;
@@ -213,10 +217,7 @@ bool CVulkan::ApplyDisplayChanges(void)
         current_shadername = shadername;
     }
 
-    if (context->swapchain->set_vsync(GUI.Vsync))
-    {
-        context->recreate_swapchain();
-    }
+    context->swapchain->set_vsync(GUI.Vsync);
 
     return true;
 }

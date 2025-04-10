@@ -7,6 +7,7 @@
 #include <fcntl.h>
 
 #include "SDL_joystick.h"
+#include "fscompat.h"
 #include "gtk_s9x.h"
 #include "gtk_config.h"
 #include "gtk_control.h"
@@ -137,8 +138,28 @@ bool S9xPollAxis(uint32 id, int16 *value)
     return true;
 }
 
+static bool using_superscope()
+{
+    for (int i = 0; i < 2; i++)
+    {
+        enum controllers ctl;
+        int8_t id1, id2, id3, id4;
+        S9xGetController(i, &ctl, &id1, &id2, &id3, &id4);
+        if (ctl == CTL_SUPERSCOPE)
+            return true;
+    }
+
+    return false;
+}
+
 bool S9xPollPointer(uint32 id, int16 *x, int16 *y)
 {
+    if (using_superscope())
+    {
+        top_level->snes_mouse_x = std::clamp(top_level->snes_mouse_x, 0.0, 256.0);
+        top_level->snes_mouse_y = std::clamp(top_level->snes_mouse_y, 0.0, 239.0);
+    }
+
     *x = top_level->snes_mouse_x;
     *y = top_level->snes_mouse_y;
 
@@ -195,7 +216,15 @@ static void change_slot(int difference)
     if (!gui_config->rom_loaded)
         return;
 
-    auto info_string = "State Slot: " + std::to_string(gui_config->current_save_slot);
+    char extension_string[5];
+    snprintf(extension_string, 5, ".%03d", gui_config->current_save_slot);
+    auto filename = S9xGetFilename(extension_string, SNAPSHOT_DIR);
+    struct stat info;
+    std::string exists = "empty";
+    if (stat(filename.c_str(), &info) == 0)
+        exists = "used";
+
+    auto info_string = "State Slot: " + std::to_string(gui_config->current_save_slot) + " [" + exists + "]";
     S9xSetInfoString(info_string.c_str());
     GFX.InfoStringTimeout = 60;
 }

@@ -33,7 +33,7 @@
 #include "win32_sound.h"
 #include "win32_display.h"
 #include "CCGShader.h"
-#include "../shaders/glsl.h"
+#include "common/video/opengl/shaders/glsl.h"
 #include "CShaderParamDlg.h"
 #include "CSaveLoadWithPreviewDlg.h"
 #include "../snes9x.h"
@@ -108,6 +108,8 @@ INT_PTR CALLBACK DlgCreateMovie(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 INT_PTR CALLBACK DlgOpenMovie(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 HRESULT CALLBACK EnumModesCallback( LPDDSURFACEDESC lpDDSurfaceDesc, LPVOID lpContext);
 int WinSearchCheatDatabase();
+void WinShowCheatEditorDialog();
+void WinShowCheatSearchDialog();
 
 VOID CALLBACK HotkeyTimer( UINT idEvent, UINT uMsg, DWORD dwUser, DWORD dw1, DWORD dw2);
 
@@ -125,7 +127,8 @@ void S9xWinScanJoypads();
 #define TIMER_SCANJOYPADS  (99999)
 #define NC_SEARCHDB 0x8000
 
-#define MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS 14
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 14;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
 
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
@@ -407,10 +410,15 @@ struct SCustomKeys CustomKeys = {
 	 {0,0}}, // Select save slot 9
 	{'R',CUSTKEY_CTRL_MASK|CUSTKEY_ALT_MASK}, // Reset Game
 	{0,0}, // Toggle Cheats
-	{0,0},
+	{0,0}, // Quit
     {'R',0}, // Rewind
+    {0,0}, // Save File Select
+    {0,0}, // Load File Select
+    {0,0}, // Mute
+    {0,0}, // Aspect ratio
+    {'G', CUSTKEY_ALT_MASK}, // Cheat Editor Dialog
+    {'A', CUSTKEY_ALT_MASK}, // Cheat Search Dialog
 };
-
 
 struct SSoundRates
 {
@@ -727,6 +735,22 @@ static char InfoString [100];
 static uint32 prevPadReadFrame = (uint32)-1;
 static bool skipNextFrameStop = false;
 
+static void ShowStatusSlotInfo()
+{
+	static char str[64];
+
+	char filename[_MAX_PATH + 1];
+	GetSlotFilename(GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, filename);
+
+	bool exists = false;
+	struct stat stats;
+	if (stat(filename, &stats) == 0)
+		exists = true;
+
+	sprintf(str, FREEZE_INFO_SET_SLOT_N, GUI.CurrentSaveSlot, GUI.CurrentSaveBank, exists ? "used" : "empty");
+	S9xSetInfoString(str);
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
 	// update toggles
@@ -861,13 +885,13 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			if(wParam == CustomKeys.SlotSave.key
 			&& modifiers == CustomKeys.SlotSave.modifiers)
 			{
-				FreezeUnfreezeSlot (GUI.CurrentSaveSlot, true);
+				FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, true);
 				hitHotKey = true;
 			}
 			if(wParam == CustomKeys.SlotLoad.key
 			&& modifiers == CustomKeys.SlotLoad.modifiers)
 			{
-				FreezeUnfreezeSlot (GUI.CurrentSaveSlot, false);
+				FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, false);
 				hitHotKey = true;
 			}
             if(wParam == CustomKeys.DialogSave.key
@@ -889,9 +913,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				if(GUI.CurrentSaveSlot > LAST_SAVE_SLOT_IN_BANK)
 					GUI.CurrentSaveSlot = 0;
 
-				static char str [64];
-				sprintf(str, FREEZE_INFO_SET_SLOT_N, GUI.CurrentSaveSlot);
-				S9xSetInfoString(str);
+				ShowStatusSlotInfo();
 
 				hitHotKey = true;
 			}
@@ -902,9 +924,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				if(GUI.CurrentSaveSlot < 0)
 					GUI.CurrentSaveSlot = 9;
 
-				static char str [64];
-				sprintf(str, FREEZE_INFO_SET_SLOT_N, GUI.CurrentSaveSlot);
-				S9xSetInfoString(str);
+				ShowStatusSlotInfo();
 
 				hitHotKey = true;
 			}
@@ -915,9 +935,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				if (GUI.CurrentSaveBank > LAST_SAVE_BANK)
 					GUI.CurrentSaveBank = 0;
 
-				static char str[64];
-				sprintf(str, FREEZE_INFO_SET_BANK_N, GUI.CurrentSaveBank);
-				S9xSetInfoString(str);
+                ShowStatusSlotInfo();
 
 				hitHotKey = true;
 			}
@@ -928,9 +946,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				if (GUI.CurrentSaveBank < 0)
 					GUI.CurrentSaveBank = 9;
 
-				static char str[64];
-				sprintf(str, FREEZE_INFO_SET_BANK_N, GUI.CurrentSaveBank);
-				S9xSetInfoString(str);
+                ShowStatusSlotInfo();
 
 				hitHotKey = true;
 			}
@@ -1222,7 +1238,54 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		{
 			auto cmd = S9xGetCommandT("ToggleBackdrop");
 			S9xApplyCommand(cmd, 1, 0);
+            hitHotKey = true;
 		}
+
+        if (wParam == CustomKeys.AspectRatio.key
+            && modifiers == CustomKeys.AspectRatio.modifiers)
+        {
+            if (GUI.AspectWidth == ASPECT_WIDTH_4_3)
+            {
+                GUI.AspectWidth = ASPECT_WIDTH_8_7;
+            }
+            else
+            {
+                GUI.AspectWidth = ASPECT_WIDTH_4_3;
+            }
+            hitHotKey = true;
+        }
+        if (wParam == CustomKeys.CheatEditorDialog.key
+            && modifiers == CustomKeys.CheatEditorDialog.modifiers)
+        {
+            // update menu state
+            CheckMenuStates();
+            // check menu state if item is enabled
+            MENUITEMINFO mii = { 0 };
+            mii.cbSize = sizeof(mii);
+            mii.fMask = MIIM_STATE;
+            GetMenuItemInfo(GUI.hMenu, ID_CHEAT_ENTER, FALSE, &mii);
+            if ((mii.fState & MFS_DISABLED) != MFS_DISABLED)
+            {
+                WinShowCheatEditorDialog();
+            }
+            hitHotKey = true;
+        }
+        if (wParam == CustomKeys.CheatSearchDialog.key
+            && modifiers == CustomKeys.CheatSearchDialog.modifiers)
+        {
+            // update menu state
+            CheckMenuStates();
+            // check menu state if item is enabled
+            MENUITEMINFO mii = { 0 };
+            mii.cbSize = sizeof(mii);
+            mii.fMask = MIIM_STATE;
+            GetMenuItemInfo(GUI.hMenu, ID_CHEAT_SEARCH, FALSE, &mii);
+            if((mii.fState & MFS_DISABLED) != MFS_DISABLED)
+            {
+                WinShowCheatSearchDialog();
+            }
+            hitHotKey = true;
+        }
 
 		//if(wParam == CustomKeys.BGLHack.key
 		//&& modifiers == CustomKeys.BGLHack.modifiers)
@@ -1270,9 +1333,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			{
 				GUI.CurrentSaveSlot = GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + i;
 
-				static char str [64];
-				sprintf(str, FREEZE_INFO_SET_SLOT_N, GUI.CurrentSaveSlot);
-				S9xSetInfoString(str);
+				ShowStatusSlotInfo();
 
 				hitHotKey = true;
 			}
@@ -1488,6 +1549,32 @@ bool WinMoviePlay(LPCTSTR filename)
 static bool startingMovie = false;
 
 HWND cheatSearchHWND = NULL;
+
+void WinShowCheatSearchDialog()
+{
+    RestoreGUIDisplay();
+    if (!cheatSearchHWND) // create and show non-modal cheat search window
+    {
+        cheatSearchHWND = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_CHEAT_SEARCH), GUI.hWnd, DlgCheatSearch); // non-modal/modeless
+        ShowWindow(cheatSearchHWND, SW_SHOW);
+    }
+    else // already open so just reactivate the window
+    {
+        SetActiveWindow(cheatSearchHWND);
+    }
+    RestoreSNESDisplay();
+}
+
+void WinShowCheatEditorDialog()
+{
+    RestoreGUIDisplay();
+    while (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_CHEATER), GUI.hWnd, DlgCheater) == NC_SEARCHDB)
+    {
+        WinSearchCheatDatabase();
+    }
+    S9xSaveCheatFile(S9xGetFilename(".cht", CHEAT_DIR));
+    RestoreSNESDisplay();
+}
 
 
 #define MOVIE_LOCKED_SETTING	if(S9xMovieActive()) {MessageBox(GUI.hWnd,TEXT("That setting is locked while a movie is active."),TEXT("Notice"),MB_OK|MB_ICONEXCLAMATION); break;}
@@ -2201,32 +2288,10 @@ LRESULT CALLBACK WinProc(
             FreezeUnfreezeDialogPreview(TRUE);
             break;
 		case ID_CHEAT_ENTER:
-			RestoreGUIDisplay ();
-			while (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_CHEATER), hWnd, DlgCheater) == NC_SEARCHDB)
-			{
-				WinSearchCheatDatabase();
-			}
-			S9xSaveCheatFile (S9xGetFilename (".cht", CHEAT_DIR));
-			RestoreSNESDisplay ();
+            WinShowCheatEditorDialog();
 			break;
 		case ID_CHEAT_SEARCH:
-			RestoreGUIDisplay ();
-			if(!cheatSearchHWND) // create and show non-modal cheat search window
-			{
-				cheatSearchHWND = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_CHEAT_SEARCH), hWnd, DlgCheatSearch); // non-modal/modeless
-				ShowWindow(cheatSearchHWND, SW_SHOW);
-			}
-			else // already open so just reactivate the window
-			{
-				SetActiveWindow(cheatSearchHWND);
-			}
-			RestoreSNESDisplay ();
-			break;
-		case ID_CHEAT_SEARCH_MODAL:
-			RestoreGUIDisplay ();
-			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_CHEAT_SEARCH), hWnd, DlgCheatSearch); // modal
-			S9xSaveCheatFile (S9xGetFilename (".cht", CHEAT_DIR));
-			RestoreSNESDisplay ();
+            WinShowCheatSearchDialog();
 			break;
 		case ID_CHEAT_APPLY:
 			Settings.ApplyCheats = !Settings.ApplyCheats;
@@ -3706,7 +3771,6 @@ static void CheckMenuStates ()
 
     SetMenuItemInfo (GUI.hMenu, ID_FILE_RESET, FALSE, &mii);
     SetMenuItemInfo (GUI.hMenu, ID_CHEAT_ENTER, FALSE, &mii);
-    SetMenuItemInfo (GUI.hMenu, ID_CHEAT_SEARCH_MODAL, FALSE, &mii);
 	SetMenuItemInfo (GUI.hMenu, IDM_ROM_INFO, FALSE, &mii);
 
 	if (GUI.FullScreen)
@@ -7552,10 +7616,10 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		SendDlgItemMessage(hDlg, IDC_ASPECTDROP, CB_ADDSTRING, 0, (LPARAM)TEXT("8:7"));
         SendDlgItemMessage(hDlg, IDC_ASPECTDROP, CB_ADDSTRING, 0, (LPARAM)TEXT("4:3"));
         switch (GUI.AspectWidth) {
-        case 256:
+        case ASPECT_WIDTH_4_3:
             SendDlgItemMessage(hDlg, IDC_ASPECTDROP, CB_SETCURSEL, (WPARAM)0, 0);
             break;
-        case 299:
+        case ASPECT_WIDTH_8_7:
             SendDlgItemMessage(hDlg, IDC_ASPECTDROP, CB_SETCURSEL, (WPARAM)1, 0);
             break;
         default:
@@ -7721,10 +7785,10 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				int newsel = SendDlgItemMessage(hDlg,IDC_ASPECTDROP,CB_GETCURSEL,0,0);
 				switch(newsel) {
 					case 0:
-						GUI.AspectWidth = 256;
+						GUI.AspectWidth = ASPECT_WIDTH_4_3;
 						break;
 					case 1:
-						GUI.AspectWidth = 299;
+						GUI.AspectWidth = ASPECT_WIDTH_8_7;
 						break;
 					default:
 						GUI.AspectWidth = prevAspectWidth;
@@ -8291,7 +8355,7 @@ struct hotkey_dialog_item {
 
 // this structure defines the four sub pages in the hotkey config dialog
 // to keep an entry blank, set the SCustomKey pointer to NULL and the text to an empty string
-static hotkey_dialog_item hotkey_dialog_items[4][MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
+static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES][MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
     {
         { &CustomKeys.SpeedUp, HOTKEYS_LABEL_1_1 },
         { &CustomKeys.SpeedDown, HOTKEYS_LABEL_1_2 },
@@ -8355,6 +8419,22 @@ static hotkey_dialog_item hotkey_dialog_items[4][MAX_SWITCHABLE_HOTKEY_DIALOG_IT
         { &CustomKeys.LoadFileSelect, HOTKEYS_LABEL_4_12 },
 		{ NULL, _T("") },
 		{ NULL, _T("") },
+    },
+    {
+        { &CustomKeys.AspectRatio, HOTKEYS_SWITCH_ASPECT_RATIO },
+        { &CustomKeys.CheatEditorDialog, HOTKEYS_CHEAT_EDITOR_DIALOG },
+        { &CustomKeys.CheatSearchDialog, HOTKEYS_CHEAT_SEARCH_DIALOG },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
+        { NULL, _T("") },
     },
 };
 
@@ -8424,7 +8504,7 @@ switch(msg)
 		SetWindowText(hDlg,HOTKEYS_TITLE);
 
 		// insert hotkey page list items
-		for(i=1 ; i <= 4 ; i++)
+		for(i=1 ; i <= MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 		{
 			TCHAR temp[256];
 			_stprintf(temp,HOTKEYS_HKCOMBO,i);
@@ -8659,12 +8739,29 @@ int WinSearchCheatDatabase()
 						ListView_GetItem(GetDlgItem(hDlg, b), &a);
 #define CHEAT_SIZE 1024
 
+/* return a vector of all selected list items with their index in the listview
+*  as first element and their lparam as second element of a pair
+*/
+static std::vector<std::pair<int, int>> get_all_selected_listitems(HWND lView)
+{
+    std::vector<std::pair<int, int>> result;
+    LVITEM lvitem = { 0 };
+    lvitem.mask = LVIF_PARAM;
+    int index = ListView_GetNextItem(lView, -1, LVNI_SELECTED);
+    do
+    {
+        lvitem.iItem = index;
+        ListView_GetItem(lView, &lvitem);
+        result.push_back(std::make_pair(index, (int)lvitem.lParam));
+    } while ((index = ListView_GetNextItem(lView, index, LVNI_SELECTED)) != -1);
+
+    return result;
+}
+
 INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	static bool internal_change;
-	static bool has_sel;
-	static int  sel_idx;
-	static uint8 new_sel;
+	static int  sel_idx = -1;
 	static CheatTracker ct;
 	switch(msg)
 	{
@@ -8744,41 +8841,75 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		{
 			switch(LOWORD(wParam))
 			{
-			case IDC_CHEAT_LIST:
-				if(0==ListView_GetSelectedCount(GetDlgItem(hDlg, IDC_CHEAT_LIST)))
-				{
-					EnableWindow(GetDlgItem(hDlg, IDC_DELETE_CHEAT), false);
-					EnableWindow(GetDlgItem(hDlg, IDC_UPDATE_CHEAT), false);
-					has_sel=false;
-					sel_idx=-1;
-				}
-				else
-				{
-					EnableWindow(GetDlgItem(hDlg, IDC_DELETE_CHEAT), true);
-					if(!has_sel||sel_idx!=ListView_GetSelectionMark(GetDlgItem(hDlg, IDC_CHEAT_LIST)))
-					{
-						new_sel=3;
-						//change
-						TCHAR buf[CHEAT_SIZE];
-						LV_ITEM lvi;
+            case IDC_CHEAT_LIST:
+            {
+                // react only to item changes (we are interested in selection or checkbox)
+                if (((LPNMHDR)lParam)->code == LVN_ITEMCHANGED)
+                {
+                    NMLISTVIEW* listview_notify = (NMLISTVIEW*)lParam;
+                    if (listview_notify->uChanged & LVIF_STATE)
+                    {
+                        HWND lView = GetDlgItem(hDlg, IDC_CHEAT_LIST);
+                        int sel_count = ListView_GetSelectedCount(lView);
+                        // selection change, update button states and selection tracking variable
+                        if ((listview_notify->uOldState & LVIS_SELECTED) != (listview_notify->uNewState & LVIS_SELECTED))
+                        {
+                            if (0 == sel_count)
+                            {
+                                EnableWindow(GetDlgItem(hDlg, IDC_DELETE_CHEAT), false);
+                                EnableWindow(GetDlgItem(hDlg, IDC_UPDATE_CHEAT), false);
+                                sel_idx = -1;
+                            }
+                            else
+                            {
+                                EnableWindow(GetDlgItem(hDlg, IDC_DELETE_CHEAT), true);
+                                if ((listview_notify->uNewState & LVIS_SELECTED))
+                                {
+                                    //change
+                                    sel_idx = listview_notify->iItem;
+                                    internal_change = true; // do not enable update button
 
-						internal_change = true; // do not enable update button
+                                    // we can't use the ITEM_QUERY macro, since the selection mark is not yet updated,
+                                    // and we also already know which id the newly selected item has
+                                    auto item_query = [&](int sel_id, int sub_id)
+                                        {
+                                            TCHAR buf[CHEAT_SIZE];
+                                            LV_ITEM lvi;
+                                            memset(&lvi, 0, sizeof(LV_ITEM));
+                                            lvi.iItem = sel_id;
+                                            lvi.iSubItem = sub_id;
+                                            lvi.mask = LVIF_TEXT;
+                                            lvi.pszText = buf;
+                                            lvi.cchTextMax = CHEAT_SIZE;
+                                            ListView_GetItem(GetDlgItem(hDlg, IDC_CHEAT_LIST), &lvi);
+                                            return std::wstring(buf);
+                                        };
 
-						/* Code */
-						ITEM_QUERY (lvi, IDC_CHEAT_LIST, 0, buf, CHEAT_SIZE);
-						SetDlgItemText(hDlg, IDC_CHEAT_CODE, lvi.pszText);
+                                    /* Code */
+                                    SetDlgItemText(hDlg, IDC_CHEAT_CODE, item_query(sel_idx, 0).c_str());
 
-						/* Description */
-						ITEM_QUERY(lvi, IDC_CHEAT_LIST, 1, buf, CHEAT_SIZE);
-						SetDlgItemText(hDlg, IDC_CHEAT_DESCRIPTION, lvi.pszText);
+                                    /* Description */
+                                    SetDlgItemText(hDlg, IDC_CHEAT_DESCRIPTION, item_query(sel_idx, 1).c_str());
 
-						internal_change = false;
-					}
-					sel_idx=ListView_GetSelectionMark(GetDlgItem(hDlg, IDC_CHEAT_LIST));
-					has_sel=true;
-				}
+                                    internal_change = false;
+                                }
+                            }
+                        }
 
-					return true;
+                        // multi-select and change of checkbox state - set same state to all selected items
+                        if (sel_count > 1 && (listview_notify->uOldState & LVIS_STATEIMAGEMASK) != (listview_notify->uNewState & LVIS_STATEIMAGEMASK))
+                        {
+                            auto selected_items = get_all_selected_listitems(lView);
+                            for (const auto &item : selected_items)
+                            {
+                                ListView_SetItemState(lView, item.first, listview_notify->uNewState, LVIS_STATEIMAGEMASK);
+                            }
+                        }
+
+                        return true;
+                    }
+                }
+            }
 			default: return false;
 			}
 		}
@@ -8796,7 +8927,7 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 						{
 							return false;
 						}
-						if(!has_sel)
+						if(sel_idx == -1)
 							return true;
 
 						EnableWindow(GetDlgItem(hDlg, IDC_UPDATE_CHEAT), true);
@@ -8894,20 +9025,22 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				break;
 			case IDC_DELETE_CHEAT:
 				{
-					LVITEM lvi;
+                    // save index, deleting item removes selection
+                    int old_sel = sel_idx;
+                    HWND lView = GetDlgItem(hDlg, IDC_CHEAT_LIST);
+                    auto deleted_items = get_all_selected_listitems(lView);
 
-					// get index in internal cheat list, if present mark as deleted
-					memset(&lvi, 0, sizeof(LVITEM));
-					lvi.mask = LVIF_PARAM;
-					lvi.iItem = sel_idx;
-					ListView_GetItem(GetDlgItem(hDlg, IDC_CHEAT_LIST), &lvi);
-					if (lvi.lParam >= 0)
-						ct.state[lvi.lParam] = Deleted;
+                    // we delete in reverse order so that our item indexes stay valid
+                    std::reverse(deleted_items.begin(), deleted_items.end());
+                    for (const auto &item : deleted_items)
+                    {
+                        // get index in internal cheat list, if present mark as deleted
+                        if(item.second >= 0)
+                            ct.state[item.second] = Deleted;
+                        ListView_DeleteItem(lView, item.first);
+                    }
 
-					// save index, deleting item removes selection
-					int old_sel = sel_idx;
-					ListView_DeleteItem(GetDlgItem(hDlg, IDC_CHEAT_LIST), sel_idx);
-					ListView_SetItemState(GetDlgItem(hDlg, IDC_CHEAT_LIST), old_sel, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
+					ListView_SetItemState(lView, old_sel, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
 				}
 
 				break;
@@ -8932,7 +9065,6 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				ListView_SetItemState(GetDlgItem(hDlg, IDC_CHEAT_LIST),sel_idx, 0, LVIS_SELECTED|LVIS_FOCUSED);
 				ListView_SetSelectionMark(GetDlgItem(hDlg, IDC_CHEAT_LIST), -1);
 				sel_idx=-1;
-				has_sel=false;
 				break;
 			case IDC_SEARCH_DB:
 				if (MessageBox(hDlg,
@@ -8963,7 +9095,7 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
 						if (temp && temp[0] && (!S9xCheatValidate(temp).empty()))
 						{
-							if (has_sel)
+							if (sel_idx != -1)
 								EnableWindow(GetDlgItem(hDlg, IDC_UPDATE_CHEAT), true);
 							else
 								EnableWindow(GetDlgItem(hDlg, IDC_UPDATE_CHEAT), false);
@@ -9077,6 +9209,7 @@ INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				return false;
 			}
 		}
+
 	default: return false;
 	}
 }
@@ -10037,7 +10170,12 @@ INT_PTR CALLBACK DlgCheatSearch(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			default: break;
 			}
 		}
-	default: return false;
+	case WM_MENUCHAR:
+	    // get rid of asterisk sound when pressing non existing menu hotkey - would play when opening
+		// with default alt + a hotkey
+        SetWindowLong(hDlg, DWLP_MSGRESULT, (MNC_CLOSE << 16));
+        return true;
+    default: return false;
 	}
 	return false;
 }
@@ -10062,6 +10200,7 @@ INT_PTR CALLBACK DlgCheatSearchAdd(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 				memset(buf,0,sizeof(TCHAR) * 12);
 				_stprintf(buf, TEXT("%u"), new_cheat->new_val);
 				SetDlgItemText(hDlg, IDC_NC_CURRVAL, buf);
+                SetDlgItemText(hDlg, IDC_NC_NEWVAL, buf);
 				memset(buf,0,sizeof(TCHAR) * 12);
 				_stprintf(buf, TEXT("%u"), new_cheat->saved_val);
 				SetDlgItemText(hDlg, IDC_NC_PREVVAL, buf);
@@ -10243,6 +10382,11 @@ INT_PTR CALLBACK DlgCheatSearchAdd(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 						ret=0;
 					}
+                    else
+                    {
+                        MessageBox(hDlg, SEARCH_ERR_INVALIDNEWVALUE, SEARCH_TITLE_RANGEERROR, MB_OK);
+                        return true;
+                    }
 				}
 
 			case IDCANCEL:

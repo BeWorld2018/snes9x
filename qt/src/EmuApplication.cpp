@@ -2,7 +2,7 @@
 #include "EmuMainWindow.hpp"
 #include "SDLInputManager.hpp"
 #include "Snes9xController.hpp"
-#include "common/audio/s9x_sound_driver_sdl.hpp"
+#include "common/audio/s9x_sound_driver_sdl3.hpp"
 #include "common/audio/s9x_sound_driver_cubeb.hpp"
 #ifdef USE_PULSEAUDIO
 #include "common/audio/s9x_sound_driver_pulse.hpp"
@@ -42,7 +42,7 @@ void EmuApplication::restartAudio()
     if (!sound_driver)
     {
         config->sound_driver = "sdl";
-        sound_driver = std::make_unique<S9xSDLSoundDriver>();
+        sound_driver = std::make_unique<S9xSDL3SoundDriver>();
     }
 
     sound_driver->init();
@@ -335,22 +335,21 @@ void EmuApplication::handleBinding(std::string name, bool pressed)
                 window->pauseContinue();
             }
 
-            else if (name == "IncreaseSlot")
+            else if (name == "IncreaseSlot" || name == "DecreaseSlot")
             {
-                save_slot++;
+                if (name == "IncreaseSlot")
+                    save_slot++;
+                else
+                    save_slot--;
+
                 if (save_slot > 999)
                     save_slot = 0;
-                emu_thread->runOnThread([&] {
-                    core->setMessage("Current slot: " + std::to_string(save_slot));
-                });
-            }
-            else if (name == "DecreaseSlot")
-            {
-                save_slot--;
                 if (save_slot < 0)
                     save_slot = 999;
-                emu_thread->runOnThread([&] {
-                    core->setMessage("Current slot: " + std::to_string(save_slot));
+
+                emu_thread->runOnThread([&, slot = this->save_slot] {
+                    std::string status = core->slotUsed(slot) ? " [used]" : " [empty]";
+                    core->setMessage("Current slot: " + std::to_string(save_slot) + status);
                 });
             }
             else if (name == "SaveState")
@@ -360,6 +359,21 @@ void EmuApplication::handleBinding(std::string name, bool pressed)
             else if (name == "LoadState")
             {
                 loadState(save_slot);
+            }
+            else if (name == "SwapControllers1and2")
+            {
+                int num_bindings = EmuConfig::num_controller_bindings * EmuConfig::allowed_bindings;
+                EmuBinding temp[num_bindings];
+                memcpy(temp, config->binding.controller[0].buttons, sizeof(temp));
+                memcpy(config->binding.controller[0].buttons, config->binding.controller[1].buttons, sizeof(temp));
+                memcpy(config->binding.controller[1].buttons, temp, sizeof(temp));
+                updateBindings();
+            }
+            else if (name == "GrabMouse")
+            {
+                if (config->port_configuration == EmuConfig::eMousePlusController ||
+                    config->port_configuration == EmuConfig::eSuperScopePlusController)
+                    window->toggleMouseGrab();
             }
         }
     }
@@ -371,6 +385,10 @@ void EmuApplication::handleBinding(std::string name, bool pressed)
     else if (name == "OpenROM" && pressed)
     {
         window->openFile();
+    }
+    else if (name == "Quit" && pressed)
+    {
+        window->close();
     }
 }
 
@@ -418,12 +436,12 @@ void EmuApplication::pollJoysticks()
 
         switch (event->type)
         {
-        case SDL_JOYDEVICEADDED:
-        case SDL_JOYDEVICEREMOVED:
+        case SDL_EVENT_JOYSTICK_ADDED:
+        case SDL_EVENT_JOYSTICK_REMOVED:
             if (joypads_changed_callback)
                 joypads_changed_callback();
             break;
-        case SDL_JOYAXISMOTION: {
+        case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
             auto axis_event = input_manager->DiscretizeJoyAxisEvent(event.value());
             if (axis_event)
             {
@@ -436,13 +454,13 @@ void EmuApplication::pollJoysticks()
             }
             break;
         }
-        case SDL_JOYBUTTONDOWN:
-        case SDL_JOYBUTTONUP:
+        case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+        case SDL_EVENT_JOYSTICK_BUTTON_UP:
             reportBinding(EmuBinding::joystick_button(
                               input_manager->devices[event->jbutton.which].index,
-                              event->jbutton.button), event->jbutton.state == 1);
+                              event->jbutton.button), event->jbutton.down == 1);
             break;
-        case SDL_JOYHATMOTION:
+        case SDL_EVENT_JOYSTICK_HAT_MOTION:
             auto hat_event = input_manager->DiscretizeHatEvent(event.value());
             if (hat_event)
             {
@@ -455,6 +473,20 @@ void EmuApplication::pollJoysticks()
             break;
         }
     }
+}
+
+void EmuApplication::reportPointer(int x, int y)
+{
+    emu_thread->runOnThread([&, x, y] {
+        core->reportPointer(x, y);
+    });
+}
+
+void EmuApplication::reportMouseButton(int button, bool pressed)
+{
+    emu_thread->runOnThread([&, button, pressed] {
+        core->reportMouseButton(button, pressed);
+    });
 }
 
 void EmuApplication::startInputTimer()
@@ -612,6 +644,11 @@ QString EmuApplication::iconPrefix()
         return whiteicons;
 
     return blackicons;
+}
+
+std::string EmuApplication::getContentFolder()
+{
+    return core->getContentFolder();
 }
 
 void EmuThread::runOnThread(std::function<void()> func, bool blocking)

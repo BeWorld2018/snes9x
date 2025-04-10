@@ -2,7 +2,6 @@
 #include "EmuApplication.hpp"
 #include "EmuConfig.hpp"
 #include "fscompat.h"
-#include <tuple>
 
 #include <QMessageBox>
 #include <QDir>
@@ -63,7 +62,7 @@ void CheatsDialog::addCode()
     if (description.empty())
         description = tr("No description").toStdString();
 
-    if (app->addCheat(description, code))
+    if (!app->addCheat(description, code))
     {
         QMessageBox::information(this, tr("Invalid Cheat"), tr("The cheat you entered was not valid."));
         return;

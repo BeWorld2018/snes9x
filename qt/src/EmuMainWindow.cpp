@@ -10,6 +10,10 @@
 #include <qnamespace.h>
 #include <qpa/qplatformnativeinterface.h>
 
+#ifdef Q_OS_WIN
+#include <dwmapi.h>
+#endif
+
 #include "EmuMainWindow.hpp"
 #include "EmuSettingsWindow.hpp"
 #include "EmuApplication.hpp"
@@ -22,6 +26,27 @@
 
 static EmuSettingsWindow *g_emu_settings_window = nullptr;
 
+class DefaultBackground
+    : public QWidget
+{
+public:
+    DefaultBackground(QWidget *parent)
+        : QWidget(parent)
+    {
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        QPainter paint(this);
+        QLinearGradient gradient(0.0, 0.0, 0.0, event->rect().toRectF().height());
+        gradient.setColorAt(0.0, QColor(0, 0, 128));
+        gradient.setColorAt(1.0, QColor(0, 0, 0));
+
+        paint.setBrush(QBrush(gradient));
+        paint.drawRect(0, 0, event->rect().width(), event->rect().height());
+    }
+};
+
 EmuMainWindow::EmuMainWindow(EmuApplication *app)
     : app(app)
 {
@@ -33,12 +58,11 @@ EmuMainWindow::EmuMainWindow(EmuApplication *app)
     mouse_timer.setTimerType(Qt::CoarseTimer);
     mouse_timer.setInterval(1000);
     mouse_timer.callOnTimeout([&] {
-        if (cursor_visible && isActivelyDrawing())
-        {
-            if (canvas)
-                canvas->setCursor(QCursor(Qt::BlankCursor));
-            cursor_visible = false;
-            mouse_timer.stop();
+        if (cursor_visible && isActivelyDrawing()) {
+        if (canvas)
+            canvas->setCursor(QCursor(Qt::BlankCursor));
+        cursor_visible = false;
+        mouse_timer.stop();
         }
     });
 }
@@ -71,67 +95,43 @@ void EmuMainWindow::destroyCanvas()
         widget->deinit();
         delete widget;
     }
+    canvas = nullptr;
 }
 
 bool EmuMainWindow::createCanvas()
 {
+    auto fallback = [this]() -> bool {
+        QMessageBox::warning(
+            this, tr("Unable to Start Display Driver"),
+            tr("Unable to create a %1 context. Attempting to use qt.")
+                .arg(QString::fromUtf8(app->config->display_driver)));
+        app->config->display_driver = "qt";
+        return createCanvas();
+    };
+
     if (app->config->display_driver != "vulkan" &&
         app->config->display_driver != "opengl" &&
         app->config->display_driver != "qt")
         app->config->display_driver = "qt";
 
-#ifndef _WIN32
-    if (QGuiApplication::platformName() == "wayland" && app->config->display_driver != "qt")
-    {
-        auto central_widget = new QStackedWidget();
-        setVisible(true);
-        QGuiApplication::processEvents();
-
-        if (app->config->display_driver == "vulkan")
-        {
-            canvas = new EmuCanvasVulkan(app->config.get(), central_widget, this);
-            QGuiApplication::processEvents();
-            if (!canvas->createContext())
-            {
-                delete canvas;
-                return false;
-            }
-        }
-        else if (app->config->display_driver == "opengl")
-        {
-            canvas = new EmuCanvasOpenGL(app->config.get(), central_widget, this);
-            QGuiApplication::processEvents();
-            app->emu_thread->runOnThread([&] { canvas->createContext(); }, true);
-        }
-
-        central_widget->addWidget(canvas);
-        central_widget->setCurrentWidget(canvas);
-        setCentralWidget(central_widget);
-        using_stacked_widget = true;
-        QGuiApplication::processEvents();
-
-        return true;
-    }
-#endif
-
     if (app->config->display_driver == "vulkan")
     {
-        canvas = new EmuCanvasVulkan(app->config.get(), this, this);
+        canvas = new EmuCanvasVulkan(app->config.get(), this);
         QGuiApplication::processEvents();
         if (!canvas->createContext())
         {
             delete canvas;
-            return false;
+            return fallback();
         }
     }
     else if (app->config->display_driver == "opengl")
     {
-        canvas = new EmuCanvasOpenGL(app->config.get(), this, this);
+        canvas = new EmuCanvasOpenGL(app->config.get(), this);
         QGuiApplication::processEvents();
         app->emu_thread->runOnThread([&] { canvas->createContext(); }, true);
     }
     else
-        canvas = new EmuCanvasQt(app->config.get(), this, this);
+        canvas = new EmuCanvasQt(app->config.get(), this);
 
     setCentralWidget(canvas);
     using_stacked_widget = false;
@@ -141,17 +141,12 @@ bool EmuMainWindow::createCanvas()
 
 void EmuMainWindow::recreateCanvas()
 {
+    if (!canvas)
+        return;
+
     app->suspendThread();
     destroyCanvas();
-
-    if (!createCanvas())
-    {
-        QMessageBox::warning(this,
-            tr("Unable to Start Display Driver"),
-            tr("Unable to create a %1 context. Attempting to use qt.").arg(QString::fromUtf8(app->config->display_driver)));
-        app->config->display_driver = "qt";
-        createCanvas();
-    }
+    createCanvas();
 
     app->unsuspendThread();
 }
@@ -167,9 +162,18 @@ void EmuMainWindow::createWidgets()
     setWindowTitle("Snes9x");
     setWindowIcon(QIcon(":/icons/snes9x.svg"));
 
+#ifdef Q_OS_WIN
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    DWM_WINDOW_CORNER_PREFERENCE cornerPref = DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref,
+                          sizeof(cornerPref));
+#endif
+
+    auto iconset = app->iconPrefix();
+
     // File menu
     auto file_menu = new QMenu(tr("&File"));
-    auto open_item = file_menu->addAction(QIcon::fromTheme("document-open"), tr("&Open File..."));
+    auto open_item = file_menu->addAction(QIcon(iconset + "open.svg"), tr("&Open File..."));
     open_item->connect(open_item, &QAction::triggered, this, [&] {
         openFile();
     });
@@ -200,7 +204,7 @@ void EmuMainWindow::createWidgets()
 
     load_state_menu->addSeparator();
 
-    auto load_state_file_item = load_state_menu->addAction(QIcon::fromTheme("document-open"), tr("From &File..."));
+    auto load_state_file_item = load_state_menu->addAction(QIcon(iconset + "open.svg"), tr("From &File..."));
     connect(load_state_file_item, &QAction::triggered, [&] {
         this->chooseState(false);
     });
@@ -208,7 +212,7 @@ void EmuMainWindow::createWidgets()
 
     load_state_menu->addSeparator();
 
-    auto load_state_undo_item = load_state_menu->addAction(QIcon::fromTheme("edit-undo"), tr("&Undo Load State"));
+    auto load_state_undo_item = load_state_menu->addAction(QIcon(iconset + "refresh.svg"), tr("&Undo Load State"));
     connect(load_state_undo_item, &QAction::triggered, [&] {
         app->loadUndoState();
     });
@@ -217,14 +221,14 @@ void EmuMainWindow::createWidgets()
     file_menu->addMenu(load_state_menu);
 
     save_state_menu->addSeparator();
-    auto save_state_file_item = save_state_menu->addAction(QIcon::fromTheme("document-save"), tr("To &File..."));
+    auto save_state_file_item = save_state_menu->addAction(QIcon(iconset + "save.svg"), tr("To &File..."));
     connect(save_state_file_item, &QAction::triggered, [&] {
         this->chooseState(true);
     });
     core_actions.push_back(save_state_file_item);
     file_menu->addMenu(save_state_menu);
 
-    auto exit_item = new QAction(QIcon::fromTheme("application-exit"), tr("E&xit"));
+    auto exit_item = new QAction(QIcon(iconset + "exit.svg"), tr("E&xit"));
     exit_item->connect(exit_item, &QAction::triggered, this, [&](bool checked) {
         close();
     });
@@ -245,7 +249,7 @@ void EmuMainWindow::createWidgets()
     });
     core_actions.push_back(run_item);
 
-    auto pause_item = emulation_menu->addAction(QIcon::fromTheme("media-playback-pause"), tr("&Pause"));
+    auto pause_item = emulation_menu->addAction(QIcon(iconset + "pause.svg"), tr("&Pause"));
     connect(pause_item, &QAction::triggered, [&] {
         if (!manual_pause)
         {
@@ -257,7 +261,7 @@ void EmuMainWindow::createWidgets()
 
     emulation_menu->addSeparator();
 
-    auto reset_item = emulation_menu->addAction(QIcon::fromTheme("view-refresh"), tr("Rese&t"));
+    auto reset_item = emulation_menu->addAction(QIcon(iconset + "refresh.svg"), tr("Rese&t"));
     connect(reset_item, &QAction::triggered, [&] {
         app->reset();
         if (manual_pause)
@@ -268,7 +272,7 @@ void EmuMainWindow::createWidgets()
     });
     core_actions.push_back(reset_item);
 
-    auto hard_reset_item = emulation_menu->addAction(QIcon::fromTheme("process-stop"), tr("&Hard Reset"));
+    auto hard_reset_item = emulation_menu->addAction(QIcon(iconset + "reset.svg"), tr("&Hard Reset"));
     connect(hard_reset_item, &QAction::triggered, [&] {
         app->powerCycle();
         if (manual_pause)
@@ -308,7 +312,7 @@ void EmuMainWindow::createWidgets()
 
     view_menu->addSeparator();
 
-    auto fullscreen_item = new QAction(QIcon::fromTheme("view-fullscreen"), tr("&Fullscreen"));
+    auto fullscreen_item = new QAction(QIcon(iconset + "fullscreen.svg"), tr("&Fullscreen"));
     view_menu->addAction(fullscreen_item);
     fullscreen_item->connect(fullscreen_item, &QAction::triggered, [&](bool checked) {
         toggleFullscreen();
@@ -328,7 +332,6 @@ void EmuMainWindow::createWidgets()
                                               tr("&Controllers..."),
                                               tr("Shortcu&ts..."),
                                               tr("&Files...") };
-    QString iconset = app->iconPrefix();
     const char *setting_icons[] = { "settings.svg",
                                     "display.svg",
                                     "sound.svg",
@@ -361,6 +364,8 @@ void EmuMainWindow::createWidgets()
 
     if (app->config->main_window_width != 0 && app->config->main_window_height != 0)
         resize(app->config->main_window_width, app->config->main_window_height);
+
+    setCentralWidget(new DefaultBackground(this));
 }
 
 void EmuMainWindow::resizeToMultiple(int multiple)
@@ -452,6 +457,12 @@ bool EmuMainWindow::openFile(std::string filename)
         setCoreActionsEnabled(true);
         if (!isFullScreen() && app->config->fullscreen_on_open)
             toggleFullscreen();
+
+        if (!canvas)
+            if (!createCanvas())
+                return false;
+
+        QApplication::sync();
         app->startGame();
         mouse_timer.start();
         return true;
@@ -477,7 +488,9 @@ void EmuMainWindow::populateRecentlyUsed()
     for (int i = 0; i < app->config->recently_used.size(); i++)
     {
         auto &string = app->config->recently_used[i];
-        auto action = recent_menu->addAction(QString("&%1: %2").arg(i).arg(QString::fromStdString(string)));
+        auto action = recent_menu->addAction(QString("&%1: %2")
+            .arg(i)
+            .arg(QDir::toNativeSeparators(QString::fromStdString(string))));
         connect(action, &QAction::triggered, [&, string] {
             openFile(string);
         });
@@ -526,6 +539,8 @@ bool EmuMainWindow::event(QEvent *event)
         }
         break;
     case QEvent::WindowDeactivate:
+        if (mouse_grabbed)
+            toggleMouseGrab();
         if (app->config->pause_emulation_when_unfocused && !focus_pause)
         {
             focus_pause = true;
@@ -548,10 +563,29 @@ bool EmuMainWindow::event(QEvent *event)
 
         break;
     }
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    {
+        if (!mouse_grabbed)
+            break;
+        auto mouse_event = (QMouseEvent *)event;
+        app->reportMouseButton(mouse_event->button(), event->type() == QEvent::MouseButtonPress);
+        break;
+    }
     case QEvent::MouseMove:
+        if (mouse_grabbed)
+        {
+            auto center = mapToGlobal(rect().center());
+            auto pos = QCursor::pos();
+            auto delta = pos - center;
+            if (delta.x() == 0 && delta.y() == 0)
+                break;
+            app->reportPointer(delta.x(), delta.y());
+            QCursor::setPos(center);
+        }
         if (!cursor_visible)
         {
-            if (canvas)
+            if (canvas && !mouse_grabbed)
                 canvas->setCursor(QCursor(Qt::ArrowCursor));
             cursor_visible = true;
             mouse_timer.start();
@@ -584,6 +618,7 @@ void EmuMainWindow::toggleFullscreen()
             app->config->setVRRConfig(true);
             app->updateSettings();
         }
+        QCursor::setPos(mapToGlobal(rect().center()));
         showFullScreen();
         menuBar()->setVisible(false);
         setBypassCompositor(true);
@@ -620,7 +655,13 @@ bool EmuMainWindow::eventFilter(QObject *watched, QEvent *event)
 
     auto key_event = (QKeyEvent *)event;
 
-    if (isFullScreen() && key_event->key() == Qt::Key_Escape)
+    if (mouse_grabbed && key_event->key() == Qt::Key_Escape && event->type() == QEvent::KeyPress)
+    {
+        toggleMouseGrab();
+        return true;
+    }
+
+    if (isFullScreen() && key_event->key() == Qt::Key_Escape && event->type() == QEvent::KeyPress)
     {
         toggleFullscreen();
         return true;
@@ -695,4 +736,19 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+void EmuMainWindow::toggleMouseGrab()
+{
+    mouse_grabbed = !mouse_grabbed;
+
+    if (mouse_grabbed)
+    {
+        canvas->setCursor(QCursor(Qt::BlankCursor));
+        QCursor::setPos(mapToGlobal(rect().center()));
+    }
+    else
+    {
+        canvas->setCursor(QCursor(Qt::ArrowCursor));
+    }
 }

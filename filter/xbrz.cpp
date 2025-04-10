@@ -1069,7 +1069,6 @@ struct ColorGradientARGB
 };
 }
 
-
 void xbrz::scale(size_t factor, const uint32_t* src, uint32_t* trg, int srcWidth, int srcHeight, ColorFormat colFmt, const xbrz::ScalerCfg& cfg, int yFirst, int yLast)
 {
     static_assert(SCALE_FACTOR_MAX == 6, "");

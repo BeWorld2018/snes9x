@@ -12,18 +12,18 @@
 
 #include <glad/gl.h>
 
-#include "common/video/opengl_context.hpp"
+#include "common/video/opengl/opengl_context.hpp"
 
 #include "gtk_compat.h"
 #ifdef GDK_WINDOWING_X11
-#include "common/video/glx_context.hpp"
+#include "common/video/opengl/glx_context.hpp"
 #endif
 #ifdef GDK_WINDOWING_WAYLAND
-#include "common/video/wayland_egl_context.hpp"
+#include "common/video/opengl/wayland_egl_context.hpp"
 #endif
 
-#include "shaders/glsl.h"
-#include "vulkan/std_chrono_throttle.hpp"
+#include "common/video/opengl/shaders/glsl.h"
+#include "common/video/std_chrono_throttle.hpp"
 
 #define BUFFER_OFFSET(i) ((char *)(i))
 
@@ -42,6 +42,8 @@ class S9xOpenGLDisplayDriver : public S9xDisplayDriver
     bool can_throttle() override { return true; }
     int get_width() final override { return output_window_width; }
     int get_height() final override { return output_window_height; }
+    void shrink() override;
+    void regrow() override;
 
   private:
     bool opengl_defaults();
