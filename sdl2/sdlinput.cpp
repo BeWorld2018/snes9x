@@ -248,8 +248,8 @@ char * S9xGetPortCommandName (s9xcommand_t cmd)
 				case 2:
 					return (strdup("Rewind"));
 
-                                case 3:
-                                        return (strdup("Advance"));
+				case 3:
+					return (strdup("Advance"));
 			}
 
 			break;
@@ -353,7 +353,7 @@ void S9xSetupDefaultKeymap (void)
 // domaemon: *) here we define the keymapping.
 void S9xParseInputConfig (ConfigFile &conf, int pass)
 {
-		keymaps.clear();
+	keymaps.clear();
 	if (!conf.GetBool("Unix::ClearAllControls", false))
 	{
 		// Using 'Joypad# Axis'
@@ -467,15 +467,10 @@ void S9xInitInputDevices (void)
 
 	int num_joysticks = SDL_NumJoysticks();
 
-	if (num_joysticks == 0)
+	if (num_joysticks > 0)
 	{
-#ifndef SDL_DROP
-		fprintf(stderr, "joystick: No joystick found.\n");
-#endif
-	}
-	else
-	{
-		//SDL_JoystickEventState (SDL_ENABLE);
+		SDL_JoystickEventState (SDL_ENABLE);
+		
 		for (int i = 0; i < num_joysticks; i++)
 		{
 			if (num_joysticks > 3)
@@ -486,24 +481,25 @@ void S9xInitInputDevices (void)
 				// This is a game controller - try opening that way
 				gamecontroller[i] = SDL_GameControllerOpen(i);
 				if (gamecontroller[i]) {
-					printf("SDL use game controller %s\n", SDL_GameControllerName(gamecontroller[i]));
+					printf("[%d] game controller %s\n", i, SDL_GameControllerName(gamecontroller[i]));
 					//joystick[i] = SDL_GameControllerGetJoystick(gamecontroller[i]);
 				} else {
 					joystick[i] = SDL_JoystickOpen (i);
-					printf ("SDL use joystick %d-axis %d-buttons %d-balls %d-hats \n",
+					//printf ("SDL use joystick %d-axis %d-buttons %d-balls %d-hats \n",
 					SDL_JoystickNumAxes(joystick[i]),
 					SDL_JoystickNumButtons(joystick[i]),
 					SDL_JoystickNumBalls(joystick[i]),
-					SDL_JoystickNumHats(joystick[i]));
+					SDL_JoystickNumHats(joystick[i]);
 				}
 			} else {
 				joystick[i] = SDL_JoystickOpen (i);
-				printf ("SDL use joystick %d-axis %d-buttons %d-balls %d-hats \n",
+				//printf ("SDL use joystick %d-axis %d-buttons %d-balls %d-hats \n",
 				SDL_JoystickNumAxes(joystick[i]),
 				SDL_JoystickNumButtons(joystick[i]),
 				SDL_JoystickNumBalls(joystick[i]),
-				SDL_JoystickNumHats(joystick[i]));
+				SDL_JoystickNumHats(joystick[i]);
 			}
+			S9xSetController(i, CTL_JOYPAD, i, 0, 0, 0);
 
 		}
 	}
@@ -536,7 +532,7 @@ void S9xProcessEvents (bool8 block)
 
 				//check extension
 				ext = strrchr(event.drop.file, '.');
-				printf("Dropfile %s\n", event.drop.file);
+				//printf("Dropfile %s\n", event.drop.file);
 				if (ext) {
 					for (int i = 0; extensions[i]; i++) {
 						if (strcmp(extensions[i],ext) == 0 ) {
@@ -618,13 +614,20 @@ void S9xProcessEvents (bool8 block)
 			
 		}
 		break;
-
 		case SDL_JOYAXISMOTION:
+		case SDL_CONTROLLERAXISMOTION:
 		{
-			S9xReportAxis(0x80008000 | // joystick axis
+			if (gamecontroller[event.cbutton.which]) {
+				S9xReportAxis(0x80008000 | // joystick axis
+				      (event.caxis.which << 24) | // joystick index
+				      event.caxis.axis, // joystick axis
+				      event.caxis.value); // axis value
+			} else {
+				S9xReportAxis(0x80008000 | // joystick axis
 				      (event.jaxis.which << 24) | // joystick index
 				      event.jaxis.axis, // joystick axis
 				      event.jaxis.value); // axis value
+			}
 		}		
 		break;
 
@@ -642,9 +645,6 @@ void S9xProcessEvents (bool8 block)
 	
 	if (quit_state == TRUE)
 	{
-#ifndef SDL_DROP
-		printf ("Quit Event. Bye.\n");
-#endif
 		S9xExit();
 	}
 }

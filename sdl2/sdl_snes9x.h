@@ -29,6 +29,7 @@ enum
 	VIDEOMODE_HQ2X
 };
 
+extern bool8 S9xCloseSoundDevice();
 
 
 
