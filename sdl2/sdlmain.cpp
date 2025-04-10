@@ -75,8 +75,8 @@
 #endif
 
 #ifdef __MORPHOS__
-unsigned long __stack = 500000;
-const char *version_tag = "$VER: Snes9X 1.62.3 (" __AMIGADATE__ ")";
+unsigned long __stack = 2 * 1024 * 1024;
+const char *version_tag = "$VER: Snes9X 1.63.0 (" __AMIGADATE__ ")";
 #endif
 
 static const char	*s9x_base_dir        = NULL,
@@ -750,7 +750,7 @@ int main (int argc, char **argv)
 	} 
 	else 
 	{
-	rom_filename = S9xParseArgs(argv, argc);
+		rom_filename = S9xParseArgs(argv, argc);
 	}
 
 #ifndef SDL_DROP

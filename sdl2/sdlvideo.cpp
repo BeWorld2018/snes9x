@@ -205,9 +205,6 @@ void S9xInitDisplay (int argc, char **argv)
 	GUI.sdl_renderer = SDL_CreateRenderer(GUI.sdl_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 	if (!GUI.sdl_renderer) {
 		GUI.sdl_renderer = SDL_CreateRenderer(GUI.sdl_window, -1, SDL_RENDERER_SOFTWARE | SDL_RENDERER_PRESENTVSYNC);
-		printf("SDL use SOFTWARE renderer with VSYNC !\n");
-	} else {
-		printf("SDL use ACCELERATED renderer with VSYNC !\n");
 	}
 
 	// scaling hint - before texture creation
@@ -379,9 +376,8 @@ void S9xMessage (int type, int number, const char *message)
 	const int	max = 36 * 3;
 	static char	buffer[max + 1];
 
-#ifndef SDL_DROP
 	fprintf(stdout, "%s\n", message);
-#endif
+
 	strncpy(buffer, message, max + 1);
 	buffer[max] = 0;
 	S9xSetInfoString(buffer);
@@ -450,8 +446,6 @@ void S9xDropWindow (void)
     SDL_RenderCopy(renderer, texture, NULL, NULL);
     SDL_RenderPresent(renderer);
 
-
-
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
 
     done = SDL_FALSE;
@@ -512,8 +506,16 @@ void S9xDropWindow (void)
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);        
 
+
+    if (!dropped_filedir) {
+		// Close Audio Device
+		S9xCloseSoundDevice();
+	}
 // Clean up
-    SDL_Quit();                       
-    if (!dropped_filedir)
-	exit(0);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+	
+	if (!dropped_filedir) {
+		//SDL_Quit(); 
+		exit(0);
+	}
 }

@@ -64,8 +64,8 @@
 #include "debug.h"
 #endif
 
-#include <SDL/SDL.h>
-//#include "sdl_snes9x.h"
+//#include <SDL/SDL.h>
+#include "sdl_snes9x.h"
 
 SDL_AudioSpec *audiospec;
 uint32        sound_buffer_size = 100;
@@ -90,17 +90,29 @@ samples_available (void *data)
     return;
 }
 
+bool8 S9xCloseSoundDevice()
+{
+	//printf("Close Audio device\n");
+	if (audiospec) {
+		SDL_free (audiospec);
+		audiospec = NULL;
+	}
+	
+   SDL_CloseAudio();
+   SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
+
 bool8 S9xOpenSoundDevice (void)
 {
 //markus
     if (Settings.Mute)
-	return FALSE;
+		return FALSE;
 
 //
 #ifdef HAVE_SDL
 	SDL_InitSubSystem (SDL_INIT_AUDIO);
 
-	audiospec = (SDL_AudioSpec *) malloc (sizeof (SDL_AudioSpec));
+	audiospec = (SDL_AudioSpec *) SDL_malloc (sizeof (SDL_AudioSpec));
 	
 	audiospec->freq = Settings.SoundPlaybackRate;
 	audiospec->channels = Settings.Stereo ? 2 : 1;
@@ -108,26 +120,16 @@ bool8 S9xOpenSoundDevice (void)
 	audiospec->samples = (sound_buffer_size * audiospec->freq / 1000) >> 2;
 	audiospec->callback = sdl_audio_callback;
 	
-#ifndef SDL_DROP
-	printf ("SDL sound driver initializing...\n");
-	printf ("    --> (Frequency: %dhz, Latency: %dms)...",
-		audiospec->freq,
-		(audiospec->samples * 1000 / audiospec->freq) << 2);
-#endif
-	
 	if (SDL_OpenAudio (audiospec, NULL) < 0)
 	  {
-	    printf ("Failed\n");
+	    //printf ("Failed\n");
 	    
-	    free (audiospec);
+	    SDL_free (audiospec);
 	    audiospec = NULL;
 	    
 	    return FALSE;
 	  }
 
-#ifndef SDL_DROP
-	printf ("OK\n");
-#endif	
 	SDL_PauseAudio (0);
 	
 	S9xSetSamplesAvailableCallback (samples_available, NULL);

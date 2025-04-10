@@ -35,8 +35,8 @@ STRIP      = ppc-morphos-strip
 GASM       = ppc-morphos-g++-11
 INCLUDES   = -I. -I.. -I../apu/ -I../apu/bapu -I../unzip/ -I../jma/ -I../filter/
 GCC_CPU=    -mstrict-align -Wall  -W -Wno-unused-parameter  -fomit-frame-pointer -fno-exceptions -fno-rtti 
-CFLAGS =   -O2 -noixemul -D__MORPHOS_SHAREDLIBS $(GCC_CPU) -I/gg/usr/local/include -I/gg/usr/local/include -D_GNU_SOURCE=1 -DZLIB -DUNZIP_SUPPORT -DJMA_SUPPORT -DHAVE_LIBPNG -DHAVE_MKSTEMP -DHAVE_STRINGS_H -DHAVE_SYS_IOCTL_H -DHAVE_STDINT_H -DRIGHTSHIFT_IS_SAR $(DEFS) -D__AMIGADATE__=\"$(AMIGADATE)\"
-LDFLAGS=   -noixemul -L/gg/usr/local/lib -lSDL2 -lc -lm -lz_shared -lpng_shared
+CFLAGS =   -O2 -noixemul -D_LARGEFILE64_SOURCE -D__MORPHOS_SHAREDLIBS $(GCC_CPU) -I/gg/usr/local/include/SDL2 -I/gg/usr/local/include -D_GNU_SOURCE=1 -DZLIB -DUNZIP_SUPPORT -DJMA_SUPPORT -DHAVE_LIBPNG -DHAVE_MKSTEMP -DHAVE_STRINGS_H -DHAVE_SYS_IOCTL_H -DHAVE_STDINT_H -DRIGHTSHIFT_IS_SAR $(DEFS) -D__AMIGADATE__=\"$(AMIGADATE)\"
+LDFLAGS=   -noixemul -L/gg/usr/local/lib -lSDL2 -lGL -lc -lm -lz_shared -lpng_shared
 CCFLAGS     = $(CFLAGS)
 
 .SUFFIXES: .o .cpp .c .cc .h .m .i .s .obj
